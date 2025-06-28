@@ -1,0 +1,30 @@
+# Исполняемые файлы
+criage-mcp-server
+criage-mcp-server.exe
+criage-mcp-server_unix
+
+# Временные файлы Go
+*.log
+*.tmp
+*.temp
+
+# Директории
+release/
+dist/
+build/
+
+# Файлы конфигурации (кроме примера)
+config.json
+
+# OS-специфичные файлы
+.DS_Store
+Thumbs.db
+
+# IDE файлы
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Логи
+*.log 

@@ -1,0 +1,26 @@
+{
+    "repositories": [
+        {
+            "name": "default",
+            "url": "http://localhost:8080",
+            "priority": 1,
+            "enabled": true,
+            "token": ""
+        },
+        {
+            "name": "public",
+            "url": "https://packages.criage.io",
+            "priority": 2,
+            "enabled": true,
+            "token": ""
+        }
+    ],
+    "global_path": "~/.criage/packages",
+    "local_path": "./criage_modules",
+    "cache_path": "~/.criage/cache",
+    "temp_path": "~/.criage/temp",
+    "timeout": 30,
+    "max_concurrency": 4,
+    "compression_level": 3,
+    "force_https": false
+}
