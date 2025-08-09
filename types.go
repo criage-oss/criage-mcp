@@ -79,21 +79,22 @@ type Repository struct {
 	Token    string `json:"token,omitempty"`
 }
 
-// RepositoryPackage информация о пакете в репозитории
+// RepositoryPackage информация о пакете в репозитории (соответствует PackageEntry в criage-server)
 type RepositoryPackage struct {
-	Name        string              `json:"name"`
-	Description string              `json:"description"`
-	Author      string              `json:"author"`
-	License     string              `json:"license"`
-	Homepage    string              `json:"homepage"`
-	Repository  string              `json:"repository"`
-	Keywords    []string            `json:"keywords"`
-	Versions    []RepositoryVersion `json:"versions"`
-	Downloads   int64               `json:"downloads"`
-	Updated     time.Time           `json:"updated"`
+	Name          string              `json:"name"`
+	Description   string              `json:"description"`
+	Author        string              `json:"author"`
+	License       string              `json:"license"`
+	Homepage      string              `json:"homepage"`
+	Repository    string              `json:"repository"`
+	Keywords      []string            `json:"keywords"`
+	Versions      []RepositoryVersion `json:"versions"`
+	LatestVersion string              `json:"latest_version"` // Добавлено для соответствия criage-server
+	Downloads     int64               `json:"downloads"`
+	Updated       time.Time           `json:"updated"`
 }
 
-// RepositoryVersion версия пакета в репозитории
+// RepositoryVersion версия пакета в репозитории (соответствует VersionEntry в criage-server)
 type RepositoryVersion struct {
 	Version      string            `json:"version"`
 	Description  string            `json:"description"`
@@ -106,7 +107,7 @@ type RepositoryVersion struct {
 	Downloads    int64             `json:"downloads"`
 }
 
-// RepositoryFile файл пакета для разных платформ
+// RepositoryFile файл пакета для разных платформ (соответствует FileEntry в criage-server)
 type RepositoryFile struct {
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
@@ -114,7 +115,7 @@ type RepositoryFile struct {
 	Filename string `json:"filename"`
 	Size     int64  `json:"size"`
 	Checksum string `json:"checksum"`
-	URL      string `json:"url"`
+	// URL убран, так как FileEntry в criage-server не содержит URL
 }
 
 // BuildManifest манифест сборки

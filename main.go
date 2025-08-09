@@ -717,12 +717,42 @@ func (s *MCPServer) repositoryInfo(args map[string]interface{}) (CallToolResult,
 		return CallToolResult{}, fmt.Errorf("URL репозитория обязателен")
 	}
 
-	// Здесь будет логика получения информации о репозитории
-	// Пока возвращаем заглушку
+	info, err := s.packageManager.GetRepositoryInfo(url)
+	if err != nil {
+		return CallToolResult{
+			Content: []ContentItem{{
+				Type: "text",
+				Text: fmt.Sprintf("❌ Ошибка получения информации о репозитории: %v", err),
+			}},
+			IsError: true,
+		}, nil
+	}
+
 	var output strings.Builder
 	output.WriteString(fmt.Sprintf("📊 Информация о репозитории: %s\n\n", url))
-	output.WriteString("Состояние: Доступен\n")
-	output.WriteString("API версия: v1\n")
+
+	if name, ok := info["name"].(string); ok {
+		output.WriteString(fmt.Sprintf("Название: %s\n", name))
+	}
+	if version, ok := info["version"].(string); ok {
+		output.WriteString(fmt.Sprintf("Версия: %s\n", version))
+	}
+	if lastUpdated, ok := info["last_updated"].(string); ok {
+		output.WriteString(fmt.Sprintf("Последнее обновление: %s\n", lastUpdated))
+	}
+	if totalPackages, ok := info["total_packages"].(float64); ok {
+		output.WriteString(fmt.Sprintf("Всего пакетов: %.0f\n", totalPackages))
+	}
+	if formats, ok := info["formats"].([]interface{}); ok {
+		output.WriteString("Поддерживаемые форматы: ")
+		for i, format := range formats {
+			if i > 0 {
+				output.WriteString(", ")
+			}
+			output.WriteString(fmt.Sprintf("%v", format))
+		}
+		output.WriteString("\n")
+	}
 
 	return CallToolResult{
 		Content: []ContentItem{{

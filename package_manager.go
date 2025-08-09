@@ -1,16 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -492,9 +493,8 @@ func (pm *PackageManager) findInRepository(repo Repository, packageName, version
 	var selectedVersion *RepositoryVersion
 	if version == "" {
 		// Берем последнюю версию
-		for i := len(pkg.Versions) - 1; i >= 0; i-- {
-			selectedVersion = &pkg.Versions[i]
-			break
+		if len(pkg.Versions) > 0 {
+			selectedVersion = &pkg.Versions[len(pkg.Versions)-1]
 		}
 	} else {
 		// Ищем указанную версию
@@ -532,10 +532,9 @@ func (pm *PackageManager) findInRepository(repo Repository, packageName, version
 		Size:        selectedFile.Size,
 	}
 
-	downloadURL := selectedFile.URL
-	if !strings.HasPrefix(downloadURL, "http") {
-		downloadURL = fmt.Sprintf("%s%s", repo.URL, downloadURL)
-	}
+	// Строим URL для скачивания на основе информации о файле
+	downloadURL := fmt.Sprintf("%s/api/v1/download/%s/%s/%s",
+		repo.URL, pkg.Name, selectedVersion.Version, selectedFile.Filename)
 
 	return info, downloadURL, nil
 }
@@ -791,8 +790,75 @@ func (pm *PackageManager) createArchive(srcDir, outputPath, format string, compr
 }
 
 func (pm *PackageManager) uploadPackage(registryURL, archivePath, token string) error {
-	// Заглушка для загрузки пакетов
-	return fmt.Errorf("загрузка пакетов пока не реализована")
+	// Открываем файл для загрузки
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("ошибка открытия файла: %w", err)
+	}
+	defer file.Close()
+
+	// Создаем multipart form
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	// Добавляем файл в form
+	part, err := writer.CreateFormFile("package", filepath.Base(archivePath))
+	if err != nil {
+		return fmt.Errorf("ошибка создания form file: %w", err)
+	}
+
+	if _, err := io.Copy(part, file); err != nil {
+		return fmt.Errorf("ошибка копирования файла: %w", err)
+	}
+
+	writer.Close()
+
+	// Создаем POST запрос
+	uploadURL := fmt.Sprintf("%s/api/v1/upload", registryURL)
+	req, err := http.NewRequest("POST", uploadURL, &body)
+	if err != nil {
+		return fmt.Errorf("ошибка создания запроса: %w", err)
+	}
+
+	// Устанавливаем заголовки
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	// Выполняем запрос
+	resp, err := pm.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("ошибка выполнения запроса: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Проверяем статус ответа
+	if resp.StatusCode == http.StatusUnauthorized {
+		return fmt.Errorf("неверный токен авторизации")
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("ошибка сервера: %d", resp.StatusCode)
+	}
+
+	// Читаем ответ
+	var result struct {
+		Success  bool   `json:"success"`
+		Message  string `json:"message"`
+		Filename string `json:"filename"`
+		Size     int64  `json:"size"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("ошибка декодирования ответа: %w", err)
+	}
+
+	if !result.Success {
+		return fmt.Errorf("операция не удалась: %s", result.Message)
+	}
+
+	return nil
 }
 
 func (pm *PackageManager) calculateChecksum(filePath string) (string, error) {
@@ -900,6 +966,51 @@ func (pm *PackageManager) GetRepositoryStats(repositoryURL string) (*Statistics,
 
 	if apiResp.Data == nil {
 		return nil, fmt.Errorf("пустые данные статистики")
+	}
+
+	return apiResp.Data, nil
+}
+
+// GetRepositoryInfo получает информацию о репозитории
+func (pm *PackageManager) GetRepositoryInfo(repositoryURL string) (map[string]interface{}, error) {
+	// Создаем URL для эндпоинта информации о репозитории
+	infoURL := fmt.Sprintf("%s/api/v1/", repositoryURL)
+
+	// Создаем GET запрос
+	req, err := http.NewRequest("GET", infoURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка создания запроса: %w", err)
+	}
+
+	// Выполняем запрос
+	resp, err := pm.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка выполнения запроса: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Проверяем статус ответа
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ошибка сервера: %d", resp.StatusCode)
+	}
+
+	// Читаем ответ
+	var apiResp struct {
+		Success bool                   `json:"success"`
+		Data    map[string]interface{} `json:"data"`
+		Message string                 `json:"message"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("ошибка декодирования ответа: %w", err)
+	}
+
+	if !apiResp.Success {
+		return nil, fmt.Errorf("операция не удалась: %s", apiResp.Message)
+	}
+
+	if apiResp.Data == nil {
+		return nil, fmt.Errorf("пустые данные репозитория")
 	}
 
 	return apiResp.Data, nil
