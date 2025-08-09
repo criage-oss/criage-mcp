@@ -1,0 +1,243 @@
+name: Build and Release Criage MCP Server
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  GO_VERSION: "1.21"
+  APP_NAME: "criage-mcp-server"
+  VERSION: "1.0.0"
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod tidy && go mod download
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check code formatting
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "Code is not formatted:"
+            gofmt -s -l .
+            exit 1
+          fi
+
+  build:
+    name: Build for multiple platforms
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            suffix: .exe
+          - goos: windows
+            goarch: arm64
+            suffix: .exe
+          - goos: linux
+            goarch: amd64
+            suffix: ""
+          - goos: linux
+            goarch: arm64
+            suffix: ""
+          - goos: darwin
+            goarch: amd64
+            suffix: ""
+          - goos: darwin
+            goarch: arm64
+            suffix: ""
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod tidy && go mod download
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          BINARY_NAME="${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
+          go build -ldflags="-s -w -X main.ServerVersion=${{ env.VERSION }}" -o "dist/${BINARY_NAME}" .
+          
+          # Копируем конфигурационные файлы
+          cp config.example.json dist/
+          cp README.md dist/
+          cp INTEGRATION.md dist/
+          
+          # Создаем архив с документацией
+          cd dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip "${BINARY_NAME%.exe}.zip" "${BINARY_NAME}" config.example.json README.md INTEGRATION.md
+          else
+            tar -czf "${BINARY_NAME}.tar.gz" "${BINARY_NAME}" config.example.json README.md INTEGRATION.md
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.APP_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find artifacts -name "*.zip" -o -name "*.tar.gz" -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          body: |
+            ## Criage MCP Server v${{ env.VERSION }}
+            
+            Model Context Protocol (MCP) сервер для интеграции Criage с AI инструментами.
+            
+            ### Поддерживаемые платформы:
+            - Windows (amd64, arm64)
+            - Linux (amd64, arm64) 
+            - macOS (amd64, arm64)
+            
+            ### Установка:
+            1. Скачайте архив для вашей платформы
+            2. Распакуйте файлы
+            3. Настройте config.json (копируйте из config.example.json)
+            4. Настройте интеграцию с AI инструментом
+            
+            ### Интеграция с Claude Desktop:
+            ```json
+            {
+              "mcpServers": {
+                "criage": {
+                  "command": "path/to/criage-mcp-server",
+                  "args": []
+                }
+              }
+            }
+            ```
+            
+            ### Поддерживаемые инструменты:
+            - `install_package` - установка пакетов
+            - `uninstall_package` - удаление пакетов
+            - `search_packages` - поиск пакетов
+            - `list_packages` - список установленных пакетов
+            - `update_package` - обновление пакетов
+            - `get_package_info` - информация о пакете
+            
+            ### MCP Protocol:
+            - Версия протокола: 2024-11-05
+            - Поддержка tools и resources
+            - JSON-RPC 2.0 over stdio
+            
+            Полная документация: https://criage.ru/mcp-server.html
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: criage/mcp-server
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
