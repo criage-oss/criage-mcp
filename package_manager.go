@@ -16,12 +16,64 @@ import (
 	"time"
 )
 
+// RateLimiter простой rate limiter для HTTP запросов
+type RateLimiter struct {
+	ticker   *time.Ticker
+	requests chan struct{}
+}
+
+// NewRateLimiter создает новый rate limiter с заданной частотой запросов в секунду
+func NewRateLimiter(requestsPerSecond int) *RateLimiter {
+	if requestsPerSecond <= 0 {
+		requestsPerSecond = 10 // по умолчанию 10 запросов в секунду
+	}
+
+	interval := time.Second / time.Duration(requestsPerSecond)
+	ticker := time.NewTicker(interval)
+	requests := make(chan struct{}, requestsPerSecond)
+
+	// Заполняем буфер
+	for i := 0; i < requestsPerSecond; i++ {
+		requests <- struct{}{}
+	}
+
+	rl := &RateLimiter{
+		ticker:   ticker,
+		requests: requests,
+	}
+
+	// Запускаем горутину для пополнения буфера
+	go func() {
+		for range ticker.C {
+			select {
+			case requests <- struct{}{}:
+			default:
+				// Буфер полон, пропускаем
+			}
+		}
+	}()
+
+	return rl
+}
+
+// Wait ждет разрешения на выполнение запроса
+func (rl *RateLimiter) Wait() {
+	<-rl.requests
+}
+
+// Close останавливает rate limiter
+func (rl *RateLimiter) Close() {
+	rl.ticker.Stop()
+	close(rl.requests)
+}
+
 // PackageManager основной менеджер пакетов
 type PackageManager struct {
 	config            *Config
 	installedPackages map[string]*PackageInfo
 	packagesMutex     sync.RWMutex
 	httpClient        *http.Client
+	rateLimiter       *RateLimiter
 }
 
 // NewPackageManager создает новый пакетный менеджер
@@ -39,6 +91,7 @@ func NewPackageManager() (*PackageManager, error) {
 		config:            config,
 		installedPackages: make(map[string]*PackageInfo),
 		httpClient:        httpClient,
+		rateLimiter:       NewRateLimiter(5), // 5 запросов в секунду
 	}
 
 	// Создаем необходимые директории
@@ -460,9 +513,12 @@ func (pm *PackageManager) findInRepository(repo Repository, packageName, version
 		return nil, "", err
 	}
 
-	if repo.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+repo.Token)
+	if repo.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+repo.AuthToken)
 	}
+
+	// Применяем rate limiting
+	pm.rateLimiter.Wait()
 
 	resp, err := pm.httpClient.Do(req)
 	if err != nil {
@@ -750,9 +806,12 @@ func (pm *PackageManager) searchInRepository(repo Repository, query string) ([]S
 		return nil, err
 	}
 
-	if repo.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+repo.Token)
+	if repo.AuthToken != "" {
+		req.Header.Set("Authorization", "Bearer "+repo.AuthToken)
 	}
+
+	// Применяем rate limiting
+	pm.rateLimiter.Wait()
 
 	resp, err := pm.httpClient.Do(req)
 	if err != nil {
@@ -826,6 +885,9 @@ func (pm *PackageManager) uploadPackage(registryURL, archivePath, token string) 
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
+	// Применяем rate limiting
+	pm.rateLimiter.Wait()
+
 	// Выполняем запрос
 	resp, err := pm.httpClient.Do(req)
 	if err != nil {
@@ -891,6 +953,9 @@ func (pm *PackageManager) RefreshRepositoryIndex(repositoryURL, authToken string
 	req.Header.Set("Authorization", "Bearer "+authToken)
 	req.Header.Set("Content-Type", "application/json")
 
+	// Применяем rate limiting
+	pm.rateLimiter.Wait()
+
 	// Выполняем запрос
 	resp, err := pm.httpClient.Do(req)
 	if err != nil {
@@ -937,6 +1002,9 @@ func (pm *PackageManager) GetRepositoryStats(repositoryURL string) (*Statistics,
 		return nil, fmt.Errorf("ошибка создания запроса: %w", err)
 	}
 
+	// Применяем rate limiting
+	pm.rateLimiter.Wait()
+
 	// Выполняем запрос
 	resp, err := pm.httpClient.Do(req)
 	if err != nil {
@@ -982,6 +1050,9 @@ func (pm *PackageManager) GetRepositoryInfo(repositoryURL string) (map[string]in
 		return nil, fmt.Errorf("ошибка создания запроса: %w", err)
 	}
 
+	// Применяем rate limiting
+	pm.rateLimiter.Wait()
+
 	// Выполняем запрос
 	resp, err := pm.httpClient.Do(req)
 	if err != nil {
@@ -1011,6 +1082,130 @@ func (pm *PackageManager) GetRepositoryInfo(repositoryURL string) (map[string]in
 
 	if apiResp.Data == nil {
 		return nil, fmt.Errorf("пустые данные репозитория")
+	}
+
+	return apiResp.Data, nil
+}
+
+// PackageListResponse структура ответа для списка пакетов с пагинацией
+type PackageListResponse struct {
+	Packages   []*RepositoryPackage `json:"packages"`
+	Total      int                  `json:"total"`
+	Page       int                  `json:"page"`
+	Limit      int                  `json:"limit"`
+	TotalPages int                  `json:"total_pages"`
+}
+
+// ListRepositoryPackages получает список всех пакетов из репозитория с пагинацией
+func (pm *PackageManager) ListRepositoryPackages(repositoryURL string, page, limit int) (*PackageListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	// Создаем URL для эндпоинта списка пакетов
+	listURL := fmt.Sprintf("%s/api/v1/packages?page=%d&limit=%d", repositoryURL, page, limit)
+
+	// Создаем GET запрос
+	req, err := http.NewRequest("GET", listURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка создания запроса: %w", err)
+	}
+
+	// Применяем rate limiting
+	pm.rateLimiter.Wait()
+
+	// Выполняем запрос
+	resp, err := pm.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка выполнения запроса: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Проверяем статус ответа
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ошибка сервера: %d", resp.StatusCode)
+	}
+
+	// Читаем ответ
+	var apiResp struct {
+		Success bool                 `json:"success"`
+		Data    *PackageListResponse `json:"data"`
+		Error   string               `json:"error"`
+		Message string               `json:"message"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("ошибка декодирования ответа: %w", err)
+	}
+
+	if !apiResp.Success {
+		if apiResp.Error != "" {
+			return nil, fmt.Errorf("операция не удалась: %s", apiResp.Error)
+		}
+		return nil, fmt.Errorf("операция не удалась: %s", apiResp.Message)
+	}
+
+	if apiResp.Data == nil {
+		return nil, fmt.Errorf("пустые данные списка пакетов")
+	}
+
+	return apiResp.Data, nil
+}
+
+// GetPackageVersionInfo получает информацию о конкретной версии пакета
+func (pm *PackageManager) GetPackageVersionInfo(repositoryURL, packageName, version string) (*RepositoryVersion, error) {
+	// Создаем URL для эндпоинта конкретной версии пакета
+	versionURL := fmt.Sprintf("%s/api/v1/packages/%s/%s", repositoryURL, packageName, version)
+
+	// Создаем GET запрос
+	req, err := http.NewRequest("GET", versionURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка создания запроса: %w", err)
+	}
+
+	// Применяем rate limiting
+	pm.rateLimiter.Wait()
+
+	// Выполняем запрос
+	resp, err := pm.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка выполнения запроса: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Проверяем статус ответа
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("версия пакета не найдена: %s@%s", packageName, version)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ошибка сервера: %d", resp.StatusCode)
+	}
+
+	// Читаем ответ
+	var apiResp struct {
+		Success bool               `json:"success"`
+		Data    *RepositoryVersion `json:"data"`
+		Error   string             `json:"error"`
+		Message string             `json:"message"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("ошибка декодирования ответа: %w", err)
+	}
+
+	if !apiResp.Success {
+		if apiResp.Error != "" {
+			return nil, fmt.Errorf("операция не удалась: %s", apiResp.Error)
+		}
+		return nil, fmt.Errorf("операция не удалась: %s", apiResp.Message)
+	}
+
+	if apiResp.Data == nil {
+		return nil, fmt.Errorf("пустые данные версии пакета")
 	}
 
 	return apiResp.Data, nil

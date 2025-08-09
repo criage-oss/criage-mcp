@@ -72,11 +72,11 @@ type Config struct {
 
 // Repository репозиторий пакетов
 type Repository struct {
-	Name     string `json:"name"`
-	URL      string `json:"url"`
-	Priority int    `json:"priority"`
-	Enabled  bool   `json:"enabled"`
-	Token    string `json:"token,omitempty"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	Priority  int    `json:"priority"`
+	Enabled   bool   `json:"enabled"`
+	AuthToken string `json:"auth_token,omitempty"`
 }
 
 // RepositoryPackage информация о пакете в репозитории (соответствует PackageEntry в criage-server)
