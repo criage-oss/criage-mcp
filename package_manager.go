@@ -30,12 +30,9 @@ func NewRateLimiter(requestsPerSecond int) *RateLimiter {
 
 	interval := time.Second / time.Duration(requestsPerSecond)
 	ticker := time.NewTicker(interval)
-	requests := make(chan struct{}, requestsPerSecond)
-
-	// Заполняем буфер
-	for i := 0; i < requestsPerSecond; i++ {
-		requests <- struct{}{}
-	}
+	requests := make(chan struct{}, 1)
+	// Стартовое «разрешение»
+	requests <- struct{}{}
 
 	rl := &RateLimiter{
 		ticker:   ticker,
@@ -45,10 +42,10 @@ func NewRateLimiter(requestsPerSecond int) *RateLimiter {
 	// Запускаем горутину для пополнения буфера
 	go func() {
 		for range ticker.C {
+			// Тик добавляет одно «разрешение», не накапливая больше одного
 			select {
 			case requests <- struct{}{}:
 			default:
-				// Буфер полон, пропускаем
 			}
 		}
 	}()

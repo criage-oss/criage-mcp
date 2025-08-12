@@ -89,7 +89,7 @@ type RepositoryPackage struct {
 	Repository    string              `json:"repository"`
 	Keywords      []string            `json:"keywords"`
 	Versions      []RepositoryVersion `json:"versions"`
-	LatestVersion string              `json:"latest_version"` // Добавлено для соответствия criage-server
+	LatestVersion string              `json:"latestVersion"`
 	Downloads     int64               `json:"downloads"`
 	Updated       time.Time           `json:"updated"`
 }
@@ -99,7 +99,7 @@ type RepositoryVersion struct {
 	Version      string            `json:"version"`
 	Description  string            `json:"description"`
 	Dependencies map[string]string `json:"dependencies"`
-	DevDeps      map[string]string `json:"dev_dependencies"`
+	DevDeps      map[string]string `json:"devDependencies"`
 	Files        []RepositoryFile  `json:"files"`
 	Size         int64             `json:"size"`
 	Checksum     string            `json:"checksum"`
@@ -149,10 +149,10 @@ type ArchiveMetadata struct {
 
 // Statistics статистика репозитория
 type Statistics struct {
-	TotalDownloads    int64          `json:"total_downloads"`
-	PackagesByLicense map[string]int `json:"packages_by_license"`
-	PackagesByAuthor  map[string]int `json:"packages_by_author"`
-	PopularPackages   []string       `json:"popular_packages"`
-	LastUpdated       time.Time      `json:"last_updated"`
-	TotalPackages     int            `json:"total_packages"`
+	TotalDownloads    int64          `json:"totalDownloads"`
+	PackagesByLicense map[string]int `json:"packagesByLicense"`
+	PackagesByAuthor  map[string]int `json:"packagesByAuthor"`
+	PopularPackages   []string       `json:"popularPackages"`
+	LastUpdated       time.Time      `json:"lastUpdated"`
+	TotalPackages     int            `json:"totalPackages"`
 }

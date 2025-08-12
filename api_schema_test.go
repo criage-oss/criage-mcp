@@ -195,7 +195,7 @@ func TestApiSchemaCompatibility(t *testing.T) {
 				"Description":   "description",
 				"Author":        "author",
 				"License":       "license",
-				"LatestVersion": "latest_version",
+				"LatestVersion": "latestVersion",
 				"Downloads":     "downloads",
 			},
 		},
@@ -205,7 +205,7 @@ func TestApiSchemaCompatibility(t *testing.T) {
 			fieldTests: map[string]string{
 				"Version":      "version",
 				"Dependencies": "dependencies",
-				"DevDeps":      "dev_dependencies",
+				"DevDeps":      "devDependencies",
 				"Size":         "size",
 				"Checksum":     "checksum",
 				"Downloads":    "downloads",
