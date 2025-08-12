@@ -1,6 +1,7 @@
 # Criage MCP Server
 
 MCP (Model Context Protocol) сервер для пакетного менеджера Criage. Предоставляет полный функционал клиента Criage через протокол MCP для интеграции с AI инструментами.
+[![Go Reference](https://pkg.go.dev/badge/github.com/criage-oss/criage-mcp.svg)](https://pkg.go.dev/github.com/criage-oss/criage-mcp)
 
 ## Описание
 
@@ -167,4 +168,4 @@ mcp-server/
 
 ## Лицензия
 
-Использует ту же лицензию, что и основной проект Criage. 
+Использует ту же лицензию, что и основной проект Criage.
