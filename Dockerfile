@@ -1,5 +1,5 @@
 # Многоэтапная сборка для минимизации размера образа
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24.4-alpine AS builder
 
 # Устанавливаем необходимые пакеты для сборки
 RUN apk add --no-cache git ca-certificates
@@ -37,7 +37,6 @@ COPY --from=builder /app/criage-mcp-server /usr/local/bin/criage-mcp-server
 
 # Копируем конфигурационные файлы
 COPY config.example.json /app/config.json
-COPY README.md INTEGRATION.md /app/
 
 # Создаем директории для данных
 RUN mkdir -p /app/data && \
