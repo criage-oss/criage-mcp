@@ -2,10 +2,11 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
+
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 type RateLimiter struct {
 	ticker   *time.Ticker
 	requests chan struct{}
+	done     chan struct{}
 }
 
 // NewRateLimiter создает новый rate limiter с заданной частотой запросов в секунду
@@ -37,15 +39,22 @@ func NewRateLimiter(requestsPerSecond int) *RateLimiter {
 	rl := &RateLimiter{
 		ticker:   ticker,
 		requests: requests,
+		done:     make(chan struct{}),
 	}
 
 	// Запускаем горутину для пополнения буфера
 	go func() {
-		for range ticker.C {
-			// Тик добавляет одно «разрешение», не накапливая больше одного
+		defer close(requests)
+		for {
 			select {
-			case requests <- struct{}{}:
-			default:
+			case <-ticker.C:
+				// Тик добавляет одно «разрешение», не накапливая больше одного
+				select {
+				case requests <- struct{}{}:
+				default:
+				}
+			case <-rl.done:
+				return
 			}
 		}
 	}()
@@ -61,7 +70,7 @@ func (rl *RateLimiter) Wait() {
 // Close останавливает rate limiter
 func (rl *RateLimiter) Close() {
 	rl.ticker.Stop()
-	close(rl.requests)
+	close(rl.done)
 }
 
 // PackageManager основной менеджер пакетов
@@ -669,7 +678,9 @@ func (pm *PackageManager) savePackageInfo(info *PackageInfo) error {
 	// Загружаем существующие пакеты
 	var packages map[string]*PackageInfo
 	if data, err := os.ReadFile(packagesPath); err == nil {
-		json.Unmarshal(data, &packages)
+		if err := json.Unmarshal(data, &packages); err != nil {
+			log.Printf("Error unmarshaling packages: %v", err)
+		}
 	}
 	if packages == nil {
 		packages = make(map[string]*PackageInfo)
@@ -698,7 +709,9 @@ func (pm *PackageManager) removePackageInfo(packageName string, global bool) err
 	// Загружаем существующие пакеты
 	var packages map[string]*PackageInfo
 	if data, err := os.ReadFile(packagesPath); err == nil {
-		json.Unmarshal(data, &packages)
+		if err := json.Unmarshal(data, &packages); err != nil {
+			log.Printf("Error unmarshaling packages: %v", err)
+		}
 	}
 	if packages == nil {
 		return nil
@@ -782,7 +795,7 @@ func (pm *PackageManager) loadManifestFromDir(dir string) (*PackageManifest, err
 func (pm *PackageManager) calculateDirSize(dir string) int64 {
 	var size int64
 
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	if err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -790,7 +803,9 @@ func (pm *PackageManager) calculateDirSize(dir string) int64 {
 			size += info.Size()
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Printf("Error walking directory %s: %v", dir, err)
+	}
 
 	return size
 }
@@ -918,21 +933,6 @@ func (pm *PackageManager) uploadPackage(registryURL, archivePath, token string) 
 	}
 
 	return nil
-}
-
-func (pm *PackageManager) calculateChecksum(filePath string) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
 // RefreshRepositoryIndex принудительно обновляет индекс пакетов в репозитории
